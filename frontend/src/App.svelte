@@ -23,8 +23,8 @@
       return;
     }
     if (res.ok) {
-      const data = await res.json();
-      logs = [...data].reverse(); /* h04-trap-reverse */
+      // 接口已按 id 倒序（最新一单在最上），前后端不得再各排一次。
+      logs = await res.json();
     }
   }
 

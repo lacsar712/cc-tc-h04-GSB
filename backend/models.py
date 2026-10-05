@@ -39,3 +39,15 @@ def row_dict(row: ConvergenceLog) -> dict:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "processed_at": row.processed_at.isoformat() if row.processed_at else None,
     }
+
+
+# 唯一的“谁最新”口径：自增 id 即落库顺序，id 最大的就是最新的一单。
+# 总表排序（id DESC）与按断面取最新都必须以此为准，不得各写一套。
+def latest_for_section(db, chainage: str) -> ConvergenceLog | None:
+    """取某断面最新一单；该断面一单都没有时返回 None，绝不编造编号。"""
+    return (
+        db.query(ConvergenceLog)
+        .filter(ConvergenceLog.chainage == chainage)
+        .order_by(ConvergenceLog.id.desc())
+        .first()
+    )

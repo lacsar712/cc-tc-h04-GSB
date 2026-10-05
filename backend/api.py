@@ -7,13 +7,21 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from claimer import start as start_claimer
-from models import Base, ConvergenceLog, SessionLocal, engine, row_dict
+from models import (
+    Base,
+    ConvergenceLog,
+    SessionLocal,
+    engine,
+    latest_for_section,
+    row_dict,
+)
 
 SECRET = os.environ.get("JWT_SECRET", "tunnelconv-dev-secret")
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 USERS = {
     "surveyor": {"role": "writer", "password_hash": pwd.hash("surv123456")},
     "inspector": {"role": "reader", "password_hash": pwd.hash("insp123456")},
+    "supervisor": {"role": "reader", "password_hash": pwd.hash("supv123456")},
 }
 
 app = Flask(__name__)
@@ -117,10 +125,9 @@ def login():
 def list_logs():
     db = SessionLocal()
     try:
-        rows = db.query(ConvergenceLog).order_by(ConvergenceLog.id.asc()).all()
-        payload = [row_dict(r) for r in rows]
-        from h04_extra_trap import expose_list
-        return jsonify(expose_list(payload))
+        # 落库顺序即 id 递增；总表最新一单必须在最上，与按断面取最新同一口径。
+        rows = db.query(ConvergenceLog).order_by(ConvergenceLog.id.desc()).all()
+        return jsonify([row_dict(r) for r in rows])
     finally:
         db.close()
 
@@ -149,5 +156,22 @@ def create_log():
         db.commit()
         db.refresh(row)
         return jsonify(row_dict(row)), 201
+    finally:
+        db.close()
+
+
+@app.get("/api/chainages/<chainage>/latest")
+@require_login
+def latest_log_of_chainage(chainage):
+    chainage = (chainage or "").strip()
+    if not chainage:
+        return jsonify({"detail": "桩号不能为空"}), 400
+    db = SessionLocal()
+    try:
+        row = latest_for_section(db, chainage)
+        if row is None:
+            # 该断面一单都没有：明确 404，不返回也不编造任何编号。
+            return jsonify({"detail": f"断面 {chainage} 暂无测缝单"}), 404
+        return jsonify(row_dict(row))
     finally:
         db.close()
