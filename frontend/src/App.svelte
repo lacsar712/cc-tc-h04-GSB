@@ -5,6 +5,9 @@
   let loginPass = "surv123456";
   let chainage = "";
   let deltaMm = "";
+  let latestChainage = "";
+  let latestResult = null; // {row} | "empty" | null
+  let latestError = "";
   let error = "";
   let loading = false;
   let timer;
@@ -23,8 +26,8 @@
       return;
     }
     if (res.ok) {
-      const data = await res.json();
-      logs = [...data].reverse(); /* h04-trap-reverse */
+      // 后端已按编号降序返回，直接用：页面最上一条就是总表最上一条，不再二次反转。
+      logs = await res.json();
     }
   }
 
@@ -81,6 +84,35 @@
       error = "提交时网络异常";
     } finally {
       loading = false;
+    }
+  }
+
+  async function lookupLatest() {
+    latestError = "";
+    latestResult = null;
+    const q = encodeURIComponent(latestChainage.trim());
+    if (!q) {
+      latestError = "请输入断面桩号";
+      return;
+    }
+    try {
+      const res = await fetch("/api/logs/latest?chainage=" + q, { headers: headers() });
+      if (res.status === 401) {
+        logout();
+        return;
+      }
+      if (res.status === 404) {
+        latestResult = "empty"; // 该断面一张单都没有：不显示任何编号
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        latestError = data.detail || "查询失败";
+        return;
+      }
+      latestResult = { row: data };
+    } catch {
+      latestError = "查询时网络异常";
     }
   }
 
@@ -157,6 +189,21 @@
         {#if error}<p class="err">{error}</p>{/if}
       </section>
     {/if}
+    <section>
+      <label>按断面取最新编号（桩号）</label>
+      <input placeholder="例如 K20+050" bind:value={latestChainage} />
+      <button class="secondary" disabled={loading} on:click={lookupLatest}>取最新编号</button>
+      {#if latestError}<p class="err">{latestError}</p>{/if}
+      {#if latestResult === "empty"}
+        <p>该断面暂无测缝记录，没有可回传的编号。</p>
+      {:else if latestResult}
+        <p>
+          断面 {latestResult.row.chainage} 最新编号：
+          <strong>{latestResult.row.id}</strong>
+          （{latestResult.row.status === "pending" ? "待处理" : "已完成"}）
+        </p>
+      {/if}
+    </section>
     <section>
       <table>
         <thead>

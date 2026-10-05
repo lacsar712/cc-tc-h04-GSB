@@ -14,6 +14,7 @@ pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 USERS = {
     "surveyor": {"role": "writer", "password_hash": pwd.hash("surv123456")},
     "inspector": {"role": "reader", "password_hash": pwd.hash("insp123456")},
+    "supervisor": {"role": "reader", "password_hash": pwd.hash("supv123456")},
 }
 
 app = Flask(__name__)
@@ -48,8 +49,10 @@ def seed():
         db.close()
 
 
-seed()
-start_claimer()
+if os.environ.get("DISABLE_STARTUP") != "1":
+    seed()
+if os.environ.get("DISABLE_CLAIMER") != "1":
+    start_claimer()
 
 
 def current_user():
@@ -117,10 +120,36 @@ def login():
 def list_logs():
     db = SessionLocal()
     try:
-        rows = db.query(ConvergenceLog).order_by(ConvergenceLog.id.asc()).all()
-        payload = [row_dict(r) for r in rows]
-        from h04_extra_trap import expose_list
-        return jsonify(expose_list(payload))
+        # 总表唯一口径：编号大的在最上，与落库顺序、按断面取最新完全一致，
+        # 不允许任何内存层再反转。
+        rows = db.query(ConvergenceLog).order_by(ConvergenceLog.id.desc()).all()
+        return jsonify([row_dict(r) for r in rows])
+    finally:
+        db.close()
+
+
+@app.get("/api/logs/latest")
+@require_login
+def latest_log():
+    """按断面取最新编号：与总表同一口径（id 最大即最新）。
+
+    该断面一张单都没有时返回 404，绝不编造编号。
+    巡检员、监理等只读角色同样可查，但都不能报送（见 require_writer）。
+    """
+    chainage = (request.args.get("chainage") or "").strip()
+    if not chainage:
+        return jsonify({"detail": "桩号不能为空"}), 400
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(ConvergenceLog)
+            .filter(ConvergenceLog.chainage == chainage)
+            .order_by(ConvergenceLog.id.desc())
+            .first()
+        )
+        if row is None:
+            return jsonify({"detail": f"断面 {chainage} 暂无测缝记录", "id": None}), 404
+        return jsonify(row_dict(row))
     finally:
         db.close()
 
@@ -138,6 +167,8 @@ def create_log():
         return jsonify({"detail": "收敛值必须是数字"}), 400
     db = SessionLocal()
     try:
+        # 落库那一拍：自增 id 即编号，commit/refresh 后回传的就是库里真实编号；
+        # 它必然同时是总表最上一条与该断面的最新编号，三处口径不会分叉。
         row = ConvergenceLog(
             chainage=chainage,
             delta_mm=delta_mm,

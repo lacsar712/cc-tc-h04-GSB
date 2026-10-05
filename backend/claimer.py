@@ -15,7 +15,9 @@ def claim_once() -> bool:
         row = (
             db.query(ConvergenceLog)
             .filter(ConvergenceLog.status == "pending")
-            .order_by(ConvergenceLog.id)
+            # 排队口径与总表一致：编号大的（最新落库）排在最上、最先认领，
+            # 不与总表的 id DESC 各说各话。
+            .order_by(ConvergenceLog.id.desc())
             .with_for_update(skip_locked=True)
             .first()
         )
